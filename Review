@@ -1,0 +1,136 @@
+//client 
+// client.cpp
+#include <iostream>
+#include <fstream>
+#include <cstring>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+
+using namespace std;
+
+const int PORT = 9090;
+const int BUFFER_SIZE = 1024;
+
+void send_file(const string& filename, const string& server_ip) {
+    int client_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (client_socket < 0) {
+        cerr << "Failed to create socket" << endl;
+        return;
+    }
+
+    struct sockaddr_in server_addr;
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(PORT);
+    inet_pton(AF_INET, server_ip.c_str(), &server_addr.sin_addr);
+
+    ifstream infile(filename, ios::binary);
+    if (!infile) {
+        cerr << "Failed to open file for reading: " << filename << endl;
+        close(client_socket);
+        return;
+    }
+
+    char buffer[BUFFER_SIZE];
+    while (infile.read(buffer, BUFFER_SIZE) || infile.gcount() > 0) {
+        ssize_t len = infile.gcount();
+        if (sendto(client_socket, buffer, len, 0, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+            cerr << "Failed to send data to server" << endl;
+            break;
+        }
+    }
+
+    infile.close();
+    close(client_socket);
+}
+
+int main() {
+    string server_ip = "127.0.0.1"; // Change to the actual server IP if needed
+    string filename = "client_file.mp4"; // The 10 MB file to send
+
+    send_file(filename, server_ip);
+    return 0;
+}
+//server 
+// server.cpp
+#include <iostream>
+#include <fstream>
+#include <cstring>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <thread>
+#include <vector>
+
+const int PORT = 9090;
+const int MAX_CLIENTS = 5;
+const int BUFFER_SIZE = 1024;
+const int FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+void handle_client(int server_socket, struct sockaddr_in client_addr, int client_number) {
+    char buffer[BUFFER_SIZE];
+    std::string filename = "received_file.mp4";
+    std::ofstream outfile(filename, std::ios::binary | std::ios::app);
+
+    if (!outfile) {
+        std::cerr << "Failed to open file for writing: " << filename << std::endl;
+        return;
+    }
+
+    socklen_t addr_len = sizeof(client_addr);
+    ssize_t received_size = 0;
+    while (received_size < FILE_SIZE) {
+        ssize_t len = recvfrom(server_socket, buffer, BUFFER_SIZE, 0, (struct sockaddr*)&client_addr, &addr_len);
+        if (len < 0) {
+            std::cerr << "Failed to receive data from client " << client_number << std::endl;
+            break;
+        }
+        outfile.write(buffer, len);
+        received_size += len;
+    }
+
+    outfile.close();
+    std::cout << "Received 10 MB data from client " << client_number << std::endl;
+}
+
+int main() {
+    int server_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (server_socket < 0) {
+        std::cerr << "Failed to create socket" << std::endl;
+        return 1;
+    }
+
+    struct sockaddr_in server_addr;
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(PORT);
+
+    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        std::cerr << "Failed to bind socket" << std::endl;
+        close(server_socket);
+        return 1;
+    }
+
+    std::vector<std::thread> client_threads;
+    for (int i = 0; i < MAX_CLIENTS; ++i) {
+        struct sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+        std::cout << "Waiting for client " << i + 1 << "..." << std::endl;
+        ssize_t len = recvfrom(server_socket, nullptr, 0, 0, (struct sockaddr*)&client_addr, &addr_len);
+        if (len < 0) {
+            std::cerr << "Failed to receive initial data from client " << i + 1 << std::endl;
+            continue;
+        }
+        std::cout << "Client " << i + 1 << " connected" << std::endl;
+        client_threads.emplace_back(handle_client, server_socket, client_addr, i + 1);
+    }
+
+    for (auto& thread : client_threads) {
+        thread.join();
+    }
+
+    close(server_socket);
+    return 0;
+}
