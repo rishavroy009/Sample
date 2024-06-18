@@ -1,0 +1,108 @@
+#include <iostream>
+#include <fstream>
+#include <cstdlib>
+#include <cstring>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/select.h>
+#include <map>
+
+#define MAX_BUFFER_SIZE 1024
+#define PORT 12345
+
+void error(const char *msg) {
+    perror(msg);
+    exit(1);
+}
+
+int main() {
+    int sockfd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    char buffer[MAX_BUFFER_SIZE];
+
+    // Create UDP socket
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+        error("ERROR opening socket");
+
+    // Initialize server address structure
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_addr.sin_port = htons(PORT);
+
+    // Bind socket to local address
+    if (bind(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0)
+        error("ERROR on binding");
+
+    std::cout << "Server listening on port " << PORT << "..." << std::endl;
+
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(sockfd, &readfds);
+    int max_sd = sockfd;
+
+    std::map<int, std::ofstream> client_files;
+    std::map<int, int> client_file_sizes;
+    std::map<int, int> client_total_received;
+
+    while (true) {
+        fd_set tempfds = readfds;
+
+        int activity = select(max_sd + 1, &tempfds, NULL, NULL, NULL);
+        if (activity < 0) {
+            error("ERROR in select");
+        }
+
+        if (FD_ISSET(sockfd, &tempfds)) {
+            int bytes_received = recvfrom(sockfd, buffer, MAX_BUFFER_SIZE, 0,
+                                          (struct sockaddr *) &client_addr, &client_len);
+            if (bytes_received < 0) {
+                error("ERROR in recvfrom");
+            }
+
+            int client_id = ntohs(client_addr.sin_port);
+            if (client_files.find(client_id) == client_files.end()) {
+                // New client connection
+                int file_size;
+                memcpy(&file_size, buffer, sizeof(file_size));
+                file_size = ntohl(file_size);
+                client_file_sizes[client_id] = file_size;
+                client_total_received[client_id] = 0;
+                client_files[client_id].open("received_file_" + std::to_string(client_id), std::ios::out | std::ios::binary);
+                if (!client_files[client_id].is_open()) {
+                    std::cerr << "Error opening file to write for client " << client_id << std::endl;
+                    close(sockfd);
+                    exit(1);
+                }
+                std::cout << "Receiving file of size: " << file_size << " bytes from client " << client_id << std::endl;
+            } else {
+                // Existing client connection
+                int total_received = client_total_received[client_id];
+                int file_size = client_file_sizes[client_id];
+                int bytes_to_receive = std::min(MAX_BUFFER_SIZE, file_size - total_received);
+
+                client_files[client_id].write(buffer, bytes_received);
+                client_total_received[client_id] += bytes_received;
+
+                // Send ACK to client
+                if (sendto(sockfd, buffer, bytes_received, 0,
+                           (struct sockaddr *) &client_addr, client_len) < 0) {
+                    error("ERROR in sendto");
+                }
+
+                if (client_total_received[client_id] >= file_size) {
+                    client_files[client_id].close();
+                    std::cout << "File received successfully from client " << client_id << std::endl;
+                    client_files.erase(client_id);
+                    client_file_sizes.erase(client_id);
+                    client_total_received.erase(client_id);
+                }
+            }
+        }
+    }
+
+    close(sockfd);
+    return 0;
+}
+
