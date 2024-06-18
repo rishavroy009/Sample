@@ -55,6 +55,7 @@ int main() {
     send_file(filename, server_ip);
     return 0;
 }
+//server
 // server.cpp
 #include <iostream>
 #include <fstream>
@@ -65,22 +66,24 @@ int main() {
 #include <unistd.h>
 #include <thread>
 #include <vector>
+#include <mutex>
 
 const int PORT = 9090;
 const int MAX_CLIENTS = 5;
 const int BUFFER_SIZE = 1024;
+std::mutex file_mutex;
 
 void handle_client(int server_socket, struct sockaddr_in client_addr) {
     char buffer[BUFFER_SIZE];
     std::string filename = "received_file.mp4";
-    std::ofstream outfile(filename, std::ios::binary | std::ios::app);
 
+    socklen_t addr_len = sizeof(client_addr);
+    std::ofstream outfile(filename, std::ios::binary | std::ios::app);
     if (!outfile) {
         std::cerr << "Failed to open file for writing: " << filename << std::endl;
         return;
     }
 
-    socklen_t addr_len = sizeof(client_addr);
     while (true) {
         ssize_t len = recvfrom(server_socket, buffer, BUFFER_SIZE, 0, (struct sockaddr*)&client_addr, &addr_len);
         if (len < 0) {
@@ -91,7 +94,10 @@ void handle_client(int server_socket, struct sockaddr_in client_addr) {
         if (strncmp(buffer, "END_OF_FILE", len) == 0) {
             break;
         }
-        outfile.write(buffer, len);
+        {
+            std::lock_guard<std::mutex> lock(file_mutex);
+            outfile.write(buffer, len);
+        }
     }
 
     outfile.close();
