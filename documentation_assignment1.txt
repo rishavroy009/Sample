@@ -60,3 +60,50 @@ After sending each chunk, the client waits for an ACK using select.
 If ACK is received within the timeout, the client proceeds.
 If no ACK is received, the client resends the last chunk.
 This approach avoids using threads, making the implementation simpler and avoiding potential issues with thread synchronization and resource contention. Instead, select allows handling multiple I/O streams efficiently in a single-threaded application.
+//receiveACK function working
+Detailed Breakdown
+Variable Declarations:
+
+char ack[MAX_BUFFER_SIZE];: Buffer to store the received acknowledgment data.
+fd_set readfds;: File descriptor set used by select to monitor the socket for readability.
+struct timeval timeout;: Structure to specify the timeout duration for select.
+Setting Timeout Interval:
+
+timeout.tv_sec = TIMEOUT_SEC;: Sets the timeout interval in seconds.
+timeout.tv_usec = 0;: Sets the timeout interval in microseconds (0 in this case).
+Clearing and Setting File Descriptor Set:
+
+FD_ZERO(&readfds);: Clears the file descriptor set.
+FD_SET(sockfd, &readfds);: Adds the socket descriptor (sockfd) to the file descriptor set.
+Using select to Wait for Data:
+
+int retval = select(sockfd + 1, &readfds, NULL, NULL, &timeout);: Waits for the socket to become ready for reading. This call monitors the socket for readability, with a timeout specified by timeout.
+sockfd + 1: The range of file descriptors to be monitored.
+&readfds: The set of file descriptors to be monitored for readability.
+NULL, NULL: We are not monitoring for writability or exceptional conditions in this case.
+&timeout: Specifies the maximum interval to wait for an event.
+Handling select Results:
+
+if (retval == -1): Checks if select encountered an error. If so, the function returns false.
+else if (retval): Checks if any file descriptors are ready for reading. If so, it enters the block.
+if (FD_ISSET(sockfd, &readfds)): Checks if the socket descriptor is part of the set ready for reading.
+int ack_len = recvfrom(sockfd, ack, MAX_BUFFER_SIZE, 0, (struct sockaddr*)&server_addr, &server_len);: Receives data from the socket.
+ack: Buffer to store the received data.
+MAX_BUFFER_SIZE: Maximum number of bytes to read.
+0: Flags (none in this case).
+(struct sockaddr*)&server_addr: Address of the server (filled by recvfrom).
+&server_len: Size of the address structure.
+if (ack_len < 0): Checks if recvfrom encountered an error. If so, calls error to handle it.
+return true;: If data is successfully received, the function returns true.
+Timeout Case:
+
+return false;: If no file descriptors are ready for reading (timeout occurred), the function returns false.
+Summary
+The receiveACK function is responsible for:
+
+Setting up a timeout for receiving the acknowledgment.
+Using select to wait for data on the socket without blocking indefinitely.
+Checking if the socket is ready for reading.
+Receiving the acknowledgment and returning true if successful.
+Handling timeouts and errors by returning false.
+This function allows the client to implement a reliable communication mechanism over UDP by waiting for an acknowledgment after sending each packet and resending if the acknowledgment is not received within the specified timeout period.
