@@ -115,7 +115,7 @@ int main() {
     close(sockfd);
     return 0;
 }
-//
+//client
 #include <iostream>
 #include <fstream>
 #include <cstdlib>
