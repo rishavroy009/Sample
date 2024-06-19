@@ -1,0 +1,62 @@
+Server Code
+Setup:
+
+The server creates a UDP socket using socket(AF_INET, SOCK_DGRAM, 0).
+It initializes the server address structure (server_addr) to listen on any IP address (INADDR_ANY) and port 12345.
+The socket is then bound to this address using bind.
+Listening:
+
+The server sets up a file descriptor set (fd_set) to monitor the socket for incoming data using select.
+select is used to wait for activity (incoming data) on the socket. It monitors multiple file descriptors and can also specify a timeout, though in this case, it waits indefinitely.
+Receiving Data:
+
+When select indicates that there's data to read, the server uses recvfrom to receive the data.
+It distinguishes between new and existing clients using the client's port (client_id = ntohs(client_addr.sin_port)).
+If it's a new client, the server extracts the filename and file size from the received data, creates and opens a new file for writing, and initializes the tracking structures for this client.
+For existing clients, it appends the received data to the corresponding file and sends an acknowledgment back using sendto.
+Acknowledgement:
+
+After writing the received data to the file, the server sends an ACK (acknowledgment) back to the client using sendto.
+When the file is completely received, the server closes the file and cleans up the tracking structures for that client.
+Client Code
+Setup:
+
+The client creates a UDP socket and initializes the server address structure (server_addr) to connect to the server's IP (127.0.0.1) and port 12345.
+Sending Initial Data:
+
+The client opens the file to be sent and determines its size.
+It sends the filename length, filename, and file size to the server in a single UDP packet.
+Sending File Data:
+
+The client reads chunks of the file and sends them to the server using sendto.
+After each chunk is sent, the client waits for an ACK from the server using a helper function receiveACK.
+Acknowledgement Handling:
+
+receiveACK uses select to wait for an acknowledgment with a timeout.
+If an ACK is received within the timeout period, the client proceeds to send the next chunk.
+If no ACK is received (timeout occurs), the client resends the last chunk by rewinding the file position.
+Use of select for I/O Multiplexing
+Server:
+
+select is used to monitor the UDP socket for incoming data without blocking the server. This allows the server to handle multiple clients using a single thread by responding only when there is data to read.
+Client:
+
+select is used to wait for an acknowledgment from the server with a specified timeout. This ensures that the client doesn't block indefinitely and can handle timeouts gracefully by resending the last packet if necessary.
+Detailed Flow
+Client starts:
+
+Sends metadata (filename length, filename, file size) to the server.
+Reads and sends chunks of the file.
+Waits for an ACK after each chunk.
+Server starts:
+
+Binds to port 12345 and waits for incoming data.
+On receiving metadata from a new client, it initializes file handling for the client.
+On receiving file data, it writes to the corresponding file and sends an ACK.
+Closes the file once all data is received.
+Acknowledgement System:
+
+After sending each chunk, the client waits for an ACK using select.
+If ACK is received within the timeout, the client proceeds.
+If no ACK is received, the client resends the last chunk.
+This approach avoids using threads, making the implementation simpler and avoiding potential issues with thread synchronization and resource contention. Instead, select allows handling multiple I/O streams efficiently in a single-threaded application.
